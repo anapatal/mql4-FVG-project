@@ -1,0 +1,246 @@
+//+------------------------------------------------------------------+
+//|                                                      SMC_FVG.mq4 |
+//|                        Copyright 2023, MetaQuotes Software Corp. |
+//|                                             https://www.mql5.com |
+//+------------------------------------------------------------------+
+#property copyright "Copyright 2023, MetaQuotes Software Corp."
+#property link      "https://www.mql5.com"
+#property version   "1.00"
+#property strict
+
+input double LotSize = 0.1;
+input int FVGLookback = 50; // Number of candles to look back for FVG
+input int CandlesForTP = 50; // Number of candles to look back for TP
+input double SLBuffer = 5; // Stop Loss buffer in pips
+
+datetime lastBarTime;
+
+//+------------------------------------------------------------------+
+//| Expert initialization function                                   |
+//+------------------------------------------------------------------+
+int OnInit()
+{
+   lastBarTime = 0;
+   return(INIT_SUCCEEDED);
+}
+
+//+------------------------------------------------------------------+
+//| Expert tick function                                             |
+//+------------------------------------------------------------------+
+void OnTick()
+{
+   // Only check for setups when a new candle forms
+   if(NewBar())
+   {
+      CheckForBuySetup();
+      CheckForSellSetup();
+   }
+}
+
+// Check if a new candle has formed
+bool NewBar()
+{
+   datetime currentBarTime = iTime(Symbol(), Period(), 0);
+   if(currentBarTime != lastBarTime)
+   {
+      lastBarTime = currentBarTime;
+      return true;
+   }
+   return false;
+}
+
+void CheckForBuySetup()
+{
+   // Check last 50 candles for FVG
+   for(int i=1; i<=FVGLookback; i++)
+   {
+      // Detect Bullish FVG
+      if(High[i+2] < Low[i])
+      {
+         double fvgTop = High[i+2];
+         double fvgBottom = Low[i];
+         
+         // Check retracement
+         for(int j=i-1; j>=1; j--)
+         {
+            if(Low[j] <= fvgTop && Low[j] >= fvgBottom && Close[j] > fvgBottom)
+            {
+               // Check CHOCH
+               int lowestIndex = FindLowestLow(j);
+               if(lowestIndex != -1)
+               {
+                  // Check reversal
+                  if(CheckBullishReversal(lowestIndex))
+                  {
+                     // Check wick in FVG
+                     if(CheckBuyWick(fvgTop, fvgBottom))
+                     {
+                        double sl = fvgBottom - SLBuffer * Point; // SL 5 pips below FVG low
+                        double tp = FindHighestHigh(CandlesForTP); // TP at highest high of last 50 candles
+                        OpenBuyOrder(sl, tp);
+                        return;
+                     }
+                  }
+               }
+            }
+         }
+      }
+   }
+}
+
+void CheckForSellSetup()
+{
+   // Check last 50 candles for FVG
+   for(int i=1; i<=FVGLookback; i++)
+   {
+      // Detect Bearish FVG
+      if(Low[i+2] > High[i])
+      {
+         double fvgTop = High[i];
+         double fvgBottom = Low[i+2];
+         
+         // Check retracement
+         for(int j=i-1; j>=1; j--)
+         {
+            if(High[j] >= fvgBottom && High[j] <= fvgTop && Close[j] < fvgTop)
+            {
+               // Check CHOCH
+               int highestIndex = FindHighestHigh(j);
+               if(highestIndex != -1)
+               {
+                  // Check reversal
+                  if(CheckBearishReversal(highestIndex))
+                  {
+                     // Check wick in FVG
+                     if(CheckSellWick(fvgTop, fvgBottom))
+                     {
+                        double sl = fvgTop + SLBuffer * Point; // SL 5 pips above FVG high
+                        double tp = FindLowestLow(CandlesForTP); // TP at lowest low of last 50 candles
+                        OpenSellOrder(sl, tp);
+                        return;
+                     }
+                  }
+               }
+            }
+         }
+      }
+   }
+}
+
+int FindLowestLow(int startFrom)
+{
+   double lowest = Low[startFrom];
+   int index = -1;
+   for(int k=startFrom-1; k>=1; k--)
+   {
+      if(Low[k] < lowest)
+      {
+         lowest = Low[k];
+         index = k;
+      }
+   }
+   return index;
+}
+
+int FindHighestHigh(int startFrom)
+{
+   double highest = High[startFrom];
+   int index = -1;
+   for(int k=startFrom-1; k>=1; k--)
+   {
+      if(High[k] > highest)
+      {
+         highest = High[k];
+         index = k;
+      }
+   }
+   return index;
+}
+
+double FindHighestHigh(int lookback)
+{
+   double highestHigh = High[1];
+   for(int i=1; i<=lookback; i++)
+   {
+      if(High[i] > highestHigh)
+         highestHigh = High[i];
+   }
+   return highestHigh;
+}
+
+double FindLowestLow(int lookback)
+{
+   double lowestLow = Low[1];
+   for(int i=1; i<=lookback; i++)
+   {
+      if(Low[i] < lowestLow)
+         lowestLow = Low[i];
+   }
+   return lowestLow;
+}
+
+bool CheckBullishReversal(int lowestIndex)
+{
+   for(int m=lowestIndex-1; m>=1; m--)
+   {
+      if(Close[m] > High[lowestIndex])
+         return true;
+   }
+   return false;
+}
+
+bool CheckBearishReversal(int highestIndex)
+{
+   for(int m=highestIndex-1; m>=1; m--)
+   {
+      if(Close[m] < Low[highestIndex])
+         return true;
+   }
+   return false;
+}
+
+bool CheckBuyWick(double top, double bottom)
+{
+   // Check the most recent closed candle
+   int n = 1;
+   if(Low[n] >= bottom && Low[n] <= top)
+   {
+      double wickSize = Low[n] - MathMin(Open[n], Close[n]);
+      double bodySize = MathAbs(Close[n] - Open[n]);
+      if(wickSize > bodySize && Close[n] > Open[n])
+         return true;
+   }
+   return false;
+}
+
+bool CheckSellWick(double top, double bottom)
+{
+   // Check the most recent closed candle
+   int n = 1;
+   if(High[n] >= bottom && High[n] <= top)
+   {
+      double wickSize = High[n] - MathMax(Open[n], Close[n]);
+      double bodySize = MathAbs(Close[n] - Open[n]);
+      if(wickSize > bodySize && Close[n] < Open[n])
+         return true;
+   }
+   return false;
+}
+
+void OpenBuyOrder(double sl, double tp)
+{
+   if(OrdersTotal() == 0)
+   {
+      OrderSend(Symbol(), OP_BUY, LotSize, Ask, 3, sl, tp, "Buy Order", 0, 0, Green);
+   }
+}
+
+void OpenSellOrder(double sl, double tp)
+{
+   if(OrdersTotal() == 0)
+   {
+      OrderSend(Symbol(), OP_SELL, LotSize, Bid, 3, sl, tp, "Sell Order", 0, 0, Red);
+   }
+}
+
+//+------------------------------------------------------------------+
